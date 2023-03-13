@@ -104,10 +104,15 @@ class Cell {
     possibleTiles = {};
     collapsed = false;
     tile = null;
+
     constructor(x, y, possibleTiles) {
         this.x=x;
         this.y=y;
         this.possibleTiles = possibleTiles;
+    }
+
+    noOptions = () => {
+        return Object.keys(this.possibleTiles).length === 0;
     }
 
     entropy = () => {
@@ -134,9 +139,12 @@ class Cell {
 
     observe = () => {
         const newTile = selectKeyFromWeighted(this.possibleTiles);
-        this.tile = new TILE_MAP[newTile];
-        this.possibleTiles = {[newTile]: 1};
-        this.collapsed = true;
+        if(newTile) {
+            this.tile = new TILE_MAP[newTile];
+            this.possibleTiles = {[newTile]: 1};
+            this.collapsed = true;
+        }
+        return false;
     }
 
     getPossibilities = (direction) => {
@@ -360,14 +368,15 @@ class World {
             return;
         }
         // collapse our pick
-        pick.observe();
+        if(!pick.observe()) {
+            // must backtract
+        }
         const stack = [pick];
 
         while(stack.length) {
             const item = stack.pop();
             for (let i = item.x-1; i <= item.x+1; i++) {
                 for (let j = item.y-1; j <= item.y+1; j++) {
-
                     if(!this.grid[i]?.[j] || this.grid[i][j].collapsed) {
                         continue;
                     }
@@ -397,9 +406,7 @@ class World {
                 }
             }
         }
-
-        await sleep(3);
-
+        await sleep(1);
         return this.collapse();
     }
 }
