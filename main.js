@@ -1,8 +1,8 @@
-const X_COUNT = 10;
-const Y_COUNT = 10;
+const X_COUNT = 20;
+const Y_COUNT = 20;
 const X_RES = 1000;
 const Y_RES = 1000;
-const SEED = 0;
+const SEED = 1;
 
 function mulberry32(a) {
     return function() {
@@ -119,6 +119,9 @@ class Cell {
     }
 
     entropy = () => {
+        if(this._entropy) {
+            return this._entropy;
+        }
         const sum = Object.keys(this.possibleTiles).reduce((sum, k) => sum + this.possibleTiles[k], 0);
         const probabilities = Object.values(this.possibleTiles);
         let entropy = 0;
@@ -127,6 +130,7 @@ class Cell {
                 entropy -= (probabilities[i] / sum) * Math.log2(probabilities[i] / sum);
             }
         }
+        this._entropy = entropy;
         return entropy;
     }
 
@@ -134,11 +138,12 @@ class Cell {
         const change = areWeightsDifferent(this.possibleTiles, newWeights);
         this.possibleTiles = newWeights;
         this.collapsed = Object.keys(this.possibleTiles).length === 1;
-        if(this.collapsed) {
+        if(change && this.collapsed) {
             this.setTile(Object.keys(this.possibleTiles)[0]);
         }
         if(change) {
-            window._world.drawTile(window._ctx, this.id, this.x, this.y);
+            this._entropy = null;
+            window._world.queueDrawTile(window._ctx, this.id, this.x, this.y);
         }
         return change;
     }
@@ -154,8 +159,11 @@ class Cell {
             this.collapsed = true;
             this.setTile(newTile);
         }
-        window._world.drawTile(window._ctx, this.id, this.x, this.y)
-        return false;
+        else {
+            return false;
+        }
+        window._world.queueDrawTile(window._ctx, this.id, this.x, this.y)
+        return true;
     }
 
 }
@@ -202,22 +210,36 @@ class World {
             }
         }
     }
-
-    drawTile(ctx, id, i, j) {
+    queue = [];
+    queueDrawTile(...args) {
+        this.queue.push(args);
+    }
+    delayedDraw() {
+        this.queue.map(q => this.drawTile.apply(this, q));
+        this.queue = [];
+    }
+    async drawTile(ctx, id, i, j) {
         const height = ctx.canvas.height / Y_COUNT;
         const width = ctx.canvas.width / X_COUNT;
         const x = width * i;
         const y = height * j;
         ctx.clearRect(x, y, width, height);
         if(this.grid[i][j].collapsed) {
-            ctx.putImageData(this.model.tileStore[id], x, y, 0, 0, width, height)
+            // now to render it bigger
+            const bitmap = await createImageBitmap(this.model.tileStore[id]);
+            const canvas = document.querySelector("canvas");
+            const ctx = canvas.getContext("2d");
+            ctx.imageSmoothingEnabled = false; // keep pixel perfect
+            ctx.drawImage(bitmap, x, y, width, height);
+           // ctx.putImageData(this.model.tileStore[id], x, y)
         }
         else {
-            ctx.fillStyle = "#000000";
-            ctx.font = `${width/3}px serif`;
-            ctx.fillText(Object.keys(this.grid[i][j].possibleTiles).length, x + width/2, y+height/2);
-            ctx.strokeStyle = "#000000";
-            ctx.strokeRect(x, y, width, height);
+            const ratio =  (Object.keys(this.grid[i][j].possibleTiles).length /Object.keys(this.model.baseWeights).length) * 255;
+            ctx.fillStyle = `rgb(${ratio},${ratio},${ratio})`;
+            //ctx.font = `${width/3}px serif`;
+            //ctx.fillText(Object.keys(this.grid[i][j].possibleTiles).length, x + width/2, y+height/2);
+            //ctx.strokeStyle = "#000000";
+            ctx.fillRect(x, y, width, height);
         }
     }
 
@@ -232,65 +254,72 @@ class World {
         }
         const lowestEntropy = sortedGrid[0].entropy();
         const lowestEntropyGrid = sortedGrid.filter(s => s.entropy() === lowestEntropy);
-
         return lowestEntropyGrid[Math.floor(rnd() * lowestEntropyGrid.length)];
     }
 
     async collapse() {
         const pick = this.pick();
         if(!pick) {
-            return;
+            return false;
         }
         // collapse our pick
         if(!pick.observe()) {
             // must backtract
+            return false;
         }
         const stack = [pick];
         while(stack.length) {
             const item = stack.pop();
             // for every grid item around the pick
-            for (let i = item.x-1; i <= item.x+1; i++) {
-                for (let j = item.y-1; j <= item.y+1; j++) {
-                    if(!this.grid[i]?.[j] || this.grid[i][j].collapsed) {
-                        continue;
-                    }
-                    const possibleSets = [];
-
-                    for(let x of [-1, 1]) {
-                        let sums = {}
-                        if(!this.grid[i+x]?.[j]) {
-                            continue;
-                        }
-                        for(const possible in this.grid[i+x][j].possibleTiles) {
-                            const weights = this.model.weights[possible][-x][0];
-                            sums = addWeights(sums, weights);
-                        }
-                        possibleSets.push(sums);
-                    }
-
-                    for(let y of [-1, 1]) {
-                        let sums = {}
-                        if(!this.grid[i]?.[j+y]) {
-                            continue;
-                        }
-                        for(const possible in this.grid[i][j+y].possibleTiles) {
-                            const weights = this.model.weights[possible][0][-y];
-                            sums = addWeights(sums, weights);
-                        }
-                        possibleSets.push(sums);
-                    }
-
-
-                    const newProbabilities = sumCommonKeys(possibleSets);
-                    if(this.grid[i][j].update(newProbabilities)) {
-                        stack.push(this.grid[i][j]);
-                        await sleep(1);
-                    }
-                }
+            for (let i of [item.x-1, item.x+1]) {
+                await this.traverse(stack, item, i, item.y)
             }
+            for (let j of [item.y-1,  item.y+1]) {
+                await this.traverse(stack, item, item.x, j)
+            }
+
         }
-        await sleep(1);
-        return this.collapse();
+        await sleep(0);
+        return true;
+    }
+
+    async traverse(stack, item, i, j) {
+        if(!this.grid[i]?.[j] || this.grid[i][j].collapsed) {
+            return true;
+        }
+        const possibleSets = [];
+        for(let x of [-1,1]) {
+            let sums = {}
+            if(!this.grid[i+x]?.[j]) {
+                continue;
+            }
+            for(const possible in this.grid[i+x][j].possibleTiles) {
+                const weights = this.model.weights[possible][-x][0];
+                sums = addWeights(sums, weights);
+            }
+            possibleSets.push(sums);
+        }
+
+        for(let y of [-1, 1]) {
+            let sums = {}
+            if(!this.grid[i]?.[j+y]) {
+                continue;
+            }
+            for(const possible in this.grid[i][j+y].possibleTiles) {
+                const weights = this.model.weights[possible][0][-y];
+                sums = addWeights(sums, weights);
+            }
+            possibleSets.push(sums);
+        }
+        const newProbabilities = sumCommonKeys(possibleSets);
+
+        if(!Object.keys(newProbabilities).length) {
+            return false;
+        }
+        if(this.grid[i][j].update(newProbabilities)) {
+            stack.push(this.grid[i][j]);
+            await sleep(0);
+        }
     }
 }
 
@@ -316,7 +345,7 @@ const getSHA256Hash = async (input) => {
     const hashBuffer = await window.crypto.subtle.digest("SHA-256", textAsBuffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hash = hashArray
-        .map((item) => item.toString(16).padStart(2, "0"))
+        .map((item) => item.toString(36).padStart(2, "0"))
         .join("");
     return hash;
 };
@@ -342,6 +371,10 @@ const generateModel = async img => {
             tiles[x][y] = {id}
             baseWeights[id] = (baseWeights[id] || 0) + 1
         }
+    }
+    const totalWeight = Object.keys(baseWeights).reduce((acc, x) => acc + baseWeights[x], 0);
+    for(const k in baseWeights) {
+        baseWeights[k] = baseWeights[k] / totalWeight;
     }
     const weights = {};
 
@@ -382,12 +415,15 @@ async function init() {
     window._world = world;
 
     const loop = () => {
-        world.draw(ctx);
+        world.delayedDraw();
         window.requestAnimationFrame(loop)
     }
-    //loop();
-
-    await world.collapse();
+    loop();
+    while(true) {
+        if(!await world.collapse()) {
+            return;
+        }
+    }
 
 }
 
