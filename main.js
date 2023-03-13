@@ -1,8 +1,11 @@
-const X_COUNT = 20;
-const Y_COUNT = 20;
+const X_COUNT = 30;
+const Y_COUNT = 30;
 const X_RES = 1000;
 const Y_RES = 1000;
-const SEED = 1;
+const SEED = 6;
+const EMPTY_OBJ ={};
+
+
 
 function mulberry32(a) {
     return function() {
@@ -13,7 +16,9 @@ function mulberry32(a) {
     }
 }
 
-const rnd = mulberry32(SEED);
+const rnd = Math.random //mulberry32(SEED);
+
+
 function shuffle(array) {
     let currentIndex = array.length,  randomIndex;
     // While there remain elements to shuffle.
@@ -76,6 +81,7 @@ function sumCommonKeys(objs) {
     return result;
 }
 
+let count=0;
 const addWeights = (obj1, obj2) => {
     const results = {};
     for(const key in obj1) {
@@ -219,8 +225,8 @@ class World {
         this.queue = [];
     }
     async drawTile(ctx, id, i, j) {
-        const height = ctx.canvas.height / Y_COUNT;
-        const width = ctx.canvas.width / X_COUNT;
+        const height = (ctx.canvas.height / Y_COUNT) | 0;
+        const width = (ctx.canvas.width / X_COUNT) | 0;
         const x = width * i;
         const y = height * j;
         ctx.clearRect(x, y, width, height);
@@ -243,12 +249,15 @@ class World {
         }
     }
 
-    pick() {
+    pick(pickRare) {
         const sortedGrid = this.grid
             .flat()
             .filter(a => !a.collapsed)
             .sort((a, b) => a.entropy() - b.entropy());
 
+        if(pickRare) {
+            sortedGrid.reverse();
+        }
         if(sortedGrid.length === 0) {
             return false;
         }
@@ -257,8 +266,8 @@ class World {
         return lowestEntropyGrid[Math.floor(rnd() * lowestEntropyGrid.length)];
     }
 
-    async collapse() {
-        const pick = this.pick();
+    async collapse(pickRare) {
+        const pick = this.pick(pickRare);
         if(!pick) {
             return false;
         }
@@ -289,7 +298,7 @@ class World {
         }
         const possibleSets = [];
         for(let x of [-1,1]) {
-            let sums = {}
+            let sums = EMPTY_OBJ;
             if(!this.grid[i+x]?.[j]) {
                 continue;
             }
@@ -301,7 +310,7 @@ class World {
         }
 
         for(let y of [-1, 1]) {
-            let sums = {}
+            let sums = EMPTY_OBJ;
             if(!this.grid[i]?.[j+y]) {
                 continue;
             }
@@ -316,7 +325,11 @@ class World {
         if(!Object.keys(newProbabilities).length) {
             return false;
         }
+
         if(this.grid[i][j].update(newProbabilities)) {
+            if(Object.keys(newProbabilities).length > 15) {
+                return false;
+            }
             stack.push(this.grid[i][j]);
             await sleep(0);
         }
@@ -405,6 +418,7 @@ async function init() {
         const img = new Image();
         img.src = "platform.png";
         document.body.appendChild(img);
+        img.style="width:50%";
         await img.decode();
         return img;
     })();
@@ -419,6 +433,7 @@ async function init() {
         window.requestAnimationFrame(loop)
     }
     loop();
+    await world.collapse(true)
     while(true) {
         if(!await world.collapse()) {
             return;
