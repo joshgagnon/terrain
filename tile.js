@@ -4,7 +4,7 @@ const X_RES = 1000;
 const Y_RES = 1000;
 const SEED = 8;
 const EMPTY_OBJ = {};
-const MAX_PROPAGATE_DISTANCE = 10;
+const MAX_PROPAGATE_DISTANCE = 1000;
 
 function mulberry32(a) {
     return function () {
@@ -76,6 +76,18 @@ const sumCommon = (weightArray) => {
     return result;
 }
 
+function setWeightAndZeroIfNeeded(primary, newArray) {
+    for (let i=0;i<primary.length;i++) {
+        if(primary[i] && newArray[i]) {
+            primary[i] += newArray[i];
+        }
+        else {
+            primary[i]=0;
+        }
+    }
+    return primary;
+
+}
 
 const addWeights = (w1, w2) => {
     for (let i=0;i<w1.length;i++) {
@@ -88,6 +100,9 @@ const normalize = (w1) => {
     let sum =0;
     for(let i=0; i < w1.length; i++) {
         sum += w1[i]
+    }
+    if(sum === 0) {
+        return false;
     }
     for(let i=0; i < w1.length; i++) {
         w1[i] = w1[i]/sum;
@@ -267,7 +282,7 @@ class World {
         }
         const stack = [pick];
         while (stack.length) {
-            const item = stack.pop();
+            const item = stack.shift();
             if (item !== pick && Math.sqrt(Math.pow(item.x - pick.x, 2) + Math.pow(item.y - pick.y, 2)) > MAX_PROPAGATE_DISTANCE) {
                 continue;
             }
@@ -283,7 +298,7 @@ class World {
         return true;
     }
 
-    async traverse(stack, i, j) {
+    async traverseWorking(stack, i, j) {
 
         if (!this.grid[i]?.[j] || this.grid[i][j].collapsed) {
             return true;
@@ -319,10 +334,61 @@ class World {
         }
         const newProbabilities = normalize(sumCommon(possibleSets));
         if (this.grid[i][j].update(newProbabilities)) {
-
             //if (Object.keys(newProbabilities).length > 100) {
                 // return false;
            // }
+            if(stack.find(x => x === this.grid[i][j])) {
+                return;
+            }
+            stack.push(this.grid[i][j]);
+            this.tick++;
+            if(this.tick % 1000 === 0) {
+                await sleep(0);
+            }
+        }
+    }
+
+    async traverse(stack, i, j) {
+
+        if (!this.grid[i]?.[j] || this.grid[i][j].collapsed) {
+            return true;
+        }
+
+        let cleanSet = new Float32Array(this.grid[i][j].possibleTiles);
+
+        for (let x of [-1,0 1]) {
+            let sums = new Float32Array(this.model.tileCount);
+            if (!this.grid[i + x]?.[j]) {
+                continue;
+            }
+            for (let possible=0;possible<this.grid[i + x][j].possibleTiles.length; possible++) {
+                if(this.grid[i + x][j].possibleTiles[possible]) {
+                    const weights = this.model.weights[possible][-x + this.model.windowRadius][1];
+                    addWeights(sums, weights);
+
+                }
+            }
+            setWeightAndZeroIfNeeded(cleanSet, sums);
+        }
+
+        for (let y of [-1, 1]) {
+            let sums = new Float32Array(this.model.tileCount);
+            if (!this.grid[i]?.[j + y]) {
+                continue;
+            }
+            for (let possible=0;possible<this.grid[i][j + y].possibleTiles.length;possible++) {
+                if(this.grid[i][j + y].possibleTiles[possible]) {
+                    const weights = this.model.weights[possible][1][-y + this.model.windowRadius];
+                    addWeights(sums, weights);
+                }
+            }
+            setWeightAndZeroIfNeeded(cleanSet, sums);
+        }
+        const newProbabilities = normalize(cleanSet);
+        if(!newProbabilities) {
+            return;
+        }
+        if (this.grid[i][j].update(newProbabilities)) {
             if(stack.find(x => x === this.grid[i][j])) {
                 return;
             }
@@ -345,7 +411,7 @@ function createCanvas() {
     canvas.style.height = `${bound}px`
     window.document.body.appendChild(canvas);
     const ctx = canvas.getContext("2d");
-    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingEnabled = false;
     return ctx;
 }
 
@@ -370,7 +436,7 @@ const generateModel = async img => {
     ctx.willReadFrequently = true;
     ctx.drawImage(img, 0, 0);
     const windowRadius = 1;
-    const tileSize = 16;
+    const tileSize = 2;
     const tiles = [];
     const tileStore = [];
     const tileMap = {};
@@ -424,20 +490,21 @@ const generateModel = async img => {
 
 async function drawTiles(model) {
     const canvas = document.createElement("canvas");
-    canvas.width = model.tileCount * model.tileSize * 2;
-    canvas.height = model.tileSize * 2 * 2;
-    canvas.style.width = model.tileSize * model.tileCount * 2;
-    canvas.style.height = model.tileSize * 2 * 2;
+    const tileSize = 16 // model.tileSize;
+    canvas.width = model.tileCount * tileSize * 2;
+    canvas.height = tileSize * 2 * 2;
+    canvas.style.width = tileSize * model.tileCount * 2;
+    canvas.style.height = tileSize* 2 * 2;
     window.document.body.prepend(canvas);
     const ctx = canvas.getContext("2d");
     ctx.imageSmoothingEnabled = false; // keep pixel perfect
     ctx.font = `12px serif`;
     ctx.fillStyle = '#000000';
     for(let i=0;i<model.tileStore.length; i++) {
-        await ctx.fillText(`${i}`, i * model.tileSize * 2, model.tileSize * 1.5);
+        await ctx.fillText(`${i}`, i * tileSize * 2, tileSize * 1.5);
         const img = model.tileStore[i];
         const bitmap = await createImageBitmap(img);
-        await ctx.drawImage(bitmap, i * model.tileSize * 2, model.tileSize * 2, model.tileSize*2,model.tileSize*2);
+        await ctx.drawImage(bitmap, i * tileSize * 2, tileSize * 2, tileSize*2,tileSize*2);
     }
 
 }
@@ -446,7 +513,7 @@ async function drawTiles(model) {
 async function init() {
     const img = await (async () => {
         const img = new Image();
-        img.src = "platform.png";
+        img.src = "patterns/Rule 126.png";
         document.body.appendChild(img);
         await img.decode();
         return img;

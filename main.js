@@ -425,7 +425,7 @@ const generateModel = async img => {
     ctx.canvas.height = img.height;
     ctx.drawImage(img, 0, 0);
 
-    const tileSize = 16;
+    const tileSize = 2;
     const tiles = [];
     const baseWeights = {};
     const tileStore = {};
@@ -472,7 +472,7 @@ const generateModel = async img => {
 async function init() {
     const img = await (async () => {
         const img = new Image();
-        img.src = "platform.png";
+        img.src = "patterns/Mazelike.png";
         document.body.appendChild(img);
 
         await img.decode();
