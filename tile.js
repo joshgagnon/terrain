@@ -1,10 +1,10 @@
-const X_COUNT = 50;
-const Y_COUNT = 50;
+const X_COUNT = 100;
+const Y_COUNT = 100;
 const X_RES = 1000;
 const Y_RES = 1000;
-const SEED = 1;
+const SEED = 8;
 const EMPTY_OBJ = {};
-const MAX_PROPAGATE_DISTANCE  =10;
+const MAX_PROPAGATE_DISTANCE = 10;
 
 function mulberry32(a) {
     return function () {
@@ -15,7 +15,7 @@ function mulberry32(a) {
     }
 }
 
-const rnd =  mulberry32(SEED);
+const rnd = mulberry32(SEED);
 
 
 function shuffle(array) {
@@ -37,144 +37,92 @@ function randomChoice(array) {
 }
 
 
-const selectKeyFromWeighted = (obj) => {
-    let keys = Object.keys(obj);
+const selectKeyFromWeighted = (weights) => {
     // Calculate the sum of the weights
     let totalWeight = 0;
-    for (let i = 0; i < keys.length; i++) {
-        totalWeight += obj[keys[i]];
+    for (let i = 0; i < weights.length; i++) {
+        totalWeight += weights[i];
     }
     // Generate a random number between 0 and the total weight
     let randomNumber = rnd() * totalWeight;
     // Loop through the keys and their weights, subtracting the weight from the random number until it reaches 0
-    for (let i = 0; i < keys.length; i++) {
-        randomNumber -= obj[keys[i]];
+    for (let i = 0; i < weights.length; i++) {
+        randomNumber -= weights[i];
         if (randomNumber <= 0) {
-            return keys[i];
+            return i;
         }
     }
     return null;
 }
 
-const selectRareKey = obj => {
-    let keys = Object.keys(obj);
-    // Calculate the sum of the weights
-    let totalWeight = 0;
-    for (let i = 0; i < keys.length; i++) {
-        totalWeight += 1/obj[keys[i]];
-    }
-    // Generate a random number between 0 and the total weight
-    let randomNumber = rnd() * totalWeight;
-    // Loop through the keys and their weights, subtracting the weight from the random number until it reaches 0
-    for (let i = 0; i < keys.length; i++) {
-        randomNumber -= 1/obj[keys[i]];
-        if (randomNumber <= 0) {
-            return keys[i];
-        }
-    }
-    return null;
+const selectRareKey = weights => {
+    return selectKeyFromWeighted(weights.map(i => 1/i))
 }
 
-function sumCommonKeys(objs) {
-    // Get an array of all the keys in the first object
-    let keys = Object.keys(objs[0]);
-    // Filter the keys to only include those that are present in every object
-    for (let i = 1; i < objs.length; i++) {
-        keys = keys.filter(key => objs[i][key]);
-    }
-    const result = {}
-    for (let i = 0; i < objs.length; i++) {
-        for (let j = 0; j < keys.length; j++) {
-            if (objs[i][keys[j]]) {
-                result[keys[j]] = (result[keys[j]] || 0) + objs[i][keys[j]];
+const sumCommon = (weightArray) => {
+    const result = new Float32Array(weightArray[0].length);
+    for(let i=0;i<weightArray[0].length;i++) {
+        let sum = 0, include = true;
+        for(let j=0;j<weightArray.length;j++) {
+            if(!weightArray[j][i]) {
+                include = false;
             }
+            sum += weightArray[j][i];
         }
-    }
-
-    const sum = Object.keys(result).reduce((sum, k) => sum + result[k], 0);
-    for (const key in result) {
-        result[key] = result[key] / sum;
-    }
-
-    return result;
-}
-
-function sumKeys(objs) {
-    const result = {};
-    for (let i = 0; i < objs.length; i++) {
-        const keys = Object.keys(objs[i]);
-        for (let j = 0; j < keys.length; j++) {
-            if (objs[i][keys[j]]) {
-                result[keys[j]] = (result[keys[j]] || 0) + objs[i][keys[j]];
-            }
+        if(include) {
+            result[i] = sum;
         }
-    }
-    const sum = Object.keys(result).reduce((sum, k) => sum + result[k], 0);
-    for (const key in result) {
-        result[key] = result[key] / sum;
     }
     return result;
 }
 
-let count = 0;
-const addWeights = (obj1, obj2) => {
-    const results = {};
-    for (const key in obj1) {
-        results[key] = (results[key] || 0) + obj1[key];
+
+const addWeights = (w1, w2) => {
+    for (let i=0;i<w1.length;i++) {
+        w1[i] += w2[i];
     }
-    for (const key in obj2) {
-        results[key] = (results[key] || 0) + obj2[key];
-    }
-    return results;
+    return w1;
 }
 
-function areWeightsDifferent(obj1, obj2) {
-    // Check if the objects have a different number of properties
-    if (Object.keys(obj1).length !== Object.keys(obj2).length) {
-        return true;
+const normalize = (w1) => {
+    let sum =0;
+    for(let i=0; i < w1.length; i++) {
+        sum += w1[i]
     }
-    // Loop through the properties of the first object and check if they differ in the second object
-    for (let prop in obj1) {
-        if (obj1[prop] !== obj2[prop]) {
+    for(let i=0; i < w1.length; i++) {
+        w1[i] = w1[i]/sum;
+    }
+    return w1;
+}
+
+function areWeightsDifferent(w1, w2) {
+    for(let i=0; i < w1.length; i++) {
+        if(w1[i] !== w2[i]) {
             return true;
         }
     }
-    // Loop through the properties of the second object and check if they differ in the first object
-    for (let prop in obj2) {
-        if (obj1[prop] !== obj2[prop]) {
-            return true;
-        }
-    }
-    return false
+    return false;
 }
 
-function filterObjectByKeys(obj, keyObject) {
-    const result = {};
-    for(let key in obj) {
-        if(keyObject[key]) {
-            result[key] = obj[key];
-        }
-    }
-    return result;
-}
 
 class Cell {
     possibleTiles = {};
     collapsed = false;
     tile = null;
 
-    constructor(x, y, possibleTiles) {
+    constructor(x, y, possibleTiles, queueDrawTile) {
         this.x = x;
         this.y = y;
         this.possibleTiles = possibleTiles;
+        this._queueDrawTile = queueDrawTile;
     }
 
     entropy = () => {
         if (this._entropy) {
             return this._entropy;
         }
-        const sum = Object.keys(this.possibleTiles).reduce((sum, k) => sum + this.possibleTiles[k], 0);
-        const probabilities = Object.values(this.possibleTiles);
+        const sum = this.possibleTiles.reduce((sum, k) => sum + k, 0);
+        const probabilities = this.possibleTiles;
         let entropy = 0;
         for (let i = 0; i < probabilities.length; i++) {
             if (probabilities[i] !== 0) {
@@ -188,31 +136,32 @@ class Cell {
     update = (newWeights) => {
         const change = areWeightsDifferent(this.possibleTiles, newWeights);
         this.possibleTiles = newWeights;
-        this.collapsed = Object.keys(this.possibleTiles).length === 1;
+        this.collapsed = this.collapsed || this.possibleTiles.filter(x => x>0).length === 1;
         if (change && this.collapsed) {
-            this.setTile(Object.keys(this.possibleTiles)[0]);
+            this.setTile(this.possibleTiles.findIndex(x => x > 0));
         }
         if (change) {
             this._entropy = null;
-            window._world.queueDrawTile(window._ctx, this.id, this.x, this.y);
+            this._queueDrawTile(this);
         }
         return change;
     }
 
-    setTile = (name) => {
-        this.possibleTiles = {[name]: 1};
-        this.id = name;
+    setTile = (id) => {
+        this.possibleTiles = new Float32Array(this.possibleTiles.length);
+        this.possibleTiles[id] = 1;
+        this.id = id;
     }
 
     observe = (pickRare = false) => {
         const newTile = pickRare ? selectRareKey(this.possibleTiles) : selectKeyFromWeighted(this.possibleTiles);
-        if (newTile) {
+        if (newTile !== null) {
             this.collapsed = true;
             this.setTile(newTile);
         } else {
             return false;
         }
-        window._world.queueDrawTile(window._ctx, this.id, this.x, this.y);
+        this._queueDrawTile(this);
         return true;
     }
 
@@ -221,16 +170,16 @@ class Cell {
 class World {
     model = null;
     grid = [];
-
-    constructor(model) {
+    tick = 0;
+    constructor(model,ctx) {
+        this.ctx = ctx;
         this.model = model;
-
         for (let i = 0; i < X_COUNT; i++) {
             for (let j = 0; j < Y_COUNT; j++) {
                 if (!this.grid[i]) {
                     this.grid[i] = [];
                 }
-                this.grid[i][j] = new Cell(i, j, model.baseWeights);
+                this.grid[i][j] = new Cell(i, j, model.baseWeights, this.queueDrawTile);
             }
         }
 
@@ -264,34 +213,32 @@ class World {
 
     queue = [];
 
-    queueDrawTile(...args) {
-        this.queue.push(args);
+    queueDrawTile = (cell) => {
+        if(!this.queue.find(x => x === cell)) {
+            this.queue.push(cell);
+        }
     }
 
     delayedDraw() {
-        this.queue.map(q => this.drawTile.apply(this, q));
+        this.queue.map( cell => this.drawTile(cell));
         this.queue = [];
     }
 
-    async drawTile(ctx, id, i, j) {
-        const height = (ctx.canvas.height / Y_COUNT) | 0;
-        const width = (ctx.canvas.width / X_COUNT) | 0;
-        const x = width * i;
-        const y = height * j;
-        ctx.clearRect(x, y, width, height);
-        if (this.grid[i][j].collapsed) {
-            // now to render it bigger
-            const bitmap = await createImageBitmap(this.model.tileStore[id]);
-            ctx.imageSmoothingEnabled = false; // keep pixel perfect
-            ctx.drawImage(bitmap, x, y, width, height);
-            // ctx.putImageData(this.model.tileStore[id], x, y)
+    async drawTile(cell) {
+        const height = (this.ctx.canvas.height / Y_COUNT) | 0;
+        const width = (this.ctx.canvas.width / X_COUNT) | 0;
+        const x_coord = width * cell.x;
+        const y_coord = height * cell.y;
+        this.ctx.clearRect(x_coord, y_coord, width, height);
+        if (cell.collapsed) {
+            await this.ctx.drawImage(this.model.tileStore[cell.id], x_coord, y_coord, width, height);
         } else {
-            const ratio = (Object.keys(this.grid[i][j].possibleTiles).length / Object.keys(this.model.baseWeights).length) * 255;
-            ctx.fillStyle = `rgb(${ratio},${ratio},${ratio})`;
+            const ratio = (cell.possibleTiles.filter(x=>x>0).length / cell.possibleTiles.length) * 255;
+            this.ctx.fillStyle = `rgb(${ratio},${ratio},${ratio})`;
             //ctx.font = `${width/3}px serif`;
             //ctx.fillText(Object.keys(this.grid[i][j].possibleTiles).length, x + width/2, y+height/2);
             //ctx.strokeStyle = "#000000";
-            ctx.fillRect(x, y, width, height);
+            this.ctx.fillRect(x_coord, y_coord, width, height);
         }
     }
 
@@ -321,7 +268,7 @@ class World {
         const stack = [pick];
         while (stack.length) {
             const item = stack.pop();
-            if(item !== pick && Math.sqrt(Math.pow(item.x - pick.x, 2) + Math.pow(item.y - pick.y, 2)) >MAX_PROPAGATE_DISTANCE) {
+            if (item !== pick && Math.sqrt(Math.pow(item.x - pick.x, 2) + Math.pow(item.y - pick.y, 2)) > MAX_PROPAGATE_DISTANCE) {
                 continue;
             }
             // for every grid item around the pick
@@ -333,61 +280,57 @@ class World {
             }
 
         }
-        await sleep(0);
         return true;
     }
 
     async traverse(stack, i, j) {
+
         if (!this.grid[i]?.[j] || this.grid[i][j].collapsed) {
             return true;
         }
-        const currentDomain = this.grid[i][j].possibleTiles;
-        const possibleSets = [];
+        const possibleSets = [this.grid[i][j].possibleTiles];
         for (let x of [-1, 1]) {
-            let sums = EMPTY_OBJ;
+            let sums = new Float32Array(this.model.tileCount);
             if (!this.grid[i + x]?.[j]) {
                 continue;
             }
-            for (const possible in this.grid[i + x][j].possibleTiles) {
-                const weights = this.model.weights[possible][-x][0];
-                const filteredWeights = filterObjectByKeys(weights, currentDomain)
-                sums = addWeights(sums, filteredWeights);
+            for (let possible=0;possible<this.grid[i + x][j].possibleTiles.length; possible++) {
+                if(this.grid[i + x][j].possibleTiles[possible]) {
+                    const weights = this.model.weights[possible][-x + this.model.windowRadius][1];
+                    sums = addWeights(sums, weights);
+                }
 
             }
-
-
             possibleSets.push(sums);
         }
 
         for (let y of [-1, 1]) {
-            let sums = EMPTY_OBJ;
+            let sums = new Float32Array(this.model.tileCount);
             if (!this.grid[i]?.[j + y]) {
                 continue;
             }
-            for (const possible in this.grid[i][j + y].possibleTiles) {
-                const weights = this.model.weights[possible][0][-y];
-                const filteredWeights = filterObjectByKeys(weights, currentDomain)
-                sums = addWeights(sums, filteredWeights);
-
-
+            for (let possible=0;possible<this.grid[i][j + y].possibleTiles.length;possible++) {
+                if(this.grid[i][j + y].possibleTiles[possible]) {
+                    const weights = this.model.weights[possible][1][-y + this.model.windowRadius];
+                    sums = addWeights(sums, weights);
+                }
             }
             possibleSets.push(sums);
         }
-        const newProbabilities = sumCommonKeys(possibleSets);
-        if (!Object.keys(newProbabilities).length) {
-            debugger
-           // return false;
-        }
-
+        const newProbabilities = normalize(sumCommon(possibleSets));
         if (this.grid[i][j].update(newProbabilities)) {
-            if (Object.keys(newProbabilities).length > 100) {
-                  // return false;
-            }
+
+            //if (Object.keys(newProbabilities).length > 100) {
+                // return false;
+           // }
             if(stack.find(x => x === this.grid[i][j])) {
                 return;
             }
             stack.push(this.grid[i][j]);
-            await sleep(0);
+            this.tick++;
+            if(this.tick % 1000 === 0) {
+                await sleep(0);
+            }
         }
     }
 }
@@ -398,10 +341,11 @@ function createCanvas() {
     const bound = Math.min(window.innerWidth, window.innerHeight);
     canvas.width = X_RES;
     canvas.height = Y_RES;
-    canvas.style.width =bound
-    canvas.style.height = bound
+    canvas.style.width =`${bound}px`
+    canvas.style.height = `${bound}px`
     window.document.body.appendChild(canvas);
     const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
     return ctx;
 }
 
@@ -423,34 +367,41 @@ const generateModel = async img => {
     const ctx = cvs.getContext("2d");
     ctx.canvas.width = img.width;
     ctx.canvas.height = img.height;
+    ctx.willReadFrequently = true;
     ctx.drawImage(img, 0, 0);
-
+    const windowRadius = 1;
     const tileSize = 16;
     const tiles = [];
-    const baseWeights = {};
-    const tileStore = {};
+    const tileStore = [];
+    const tileMap = {};
+    const tileCounts = [];
+    let tileCount = 0;
     for (let x = 0; x < img.width / tileSize; x++) {
         tiles[x] = [];
         for (let y = 0; y < img.height / tileSize; y++) {
-            //ctx.drawImage(img, x * tileSize, y * tileSize, tileSize, tileSize, 0, 0, tileSize, tileSize);
             const imageData = ctx.getImageData(x * tileSize, y * tileSize, tileSize, tileSize);
-            const id = await getSHA256Hash(imageData.data);
-            tileStore[id] = imageData;
-            tiles[x][y] = {id}
-            baseWeights[id] = (baseWeights[id] || 0) + 1
+            const hash = await getSHA256Hash(imageData.data);
+            if (!tileMap[hash]) {
+                tileMap[hash] = tileCount++;
+            }
+            tileStore[tileMap[hash]] = await createImageBitmap(imageData);
+            tiles[x][y] = {id: tileMap[hash]}
+            tileCounts[tileMap[hash]] = (tileCounts[tileMap[hash]] || 0) + 1
         }
     }
-    const totalWeight = Object.keys(baseWeights).reduce((acc, x) => acc + baseWeights[x], 0);
-    for (const k in baseWeights) {
-        baseWeights[k] = baseWeights[k] / totalWeight;
-    }
-    const weights = {};
+    const totalWeight = tileCounts.reduce((acc, x) => acc + x, 0);
+    const baseWeights = new Float32Array(tileCount);
 
-    const getDefaultWeights = () => ({
-        '-1': {'-1': {}, '0': {}, '1': {}},
-        '0': {'-1': {}, '0': {}, '1': {}},
-        '1': {'-1': {}, '0': {}, '1': {}},
-    });
+    for (const i in tileCounts) {
+        baseWeights[i] = tileCounts[i] / totalWeight;
+    }
+
+    const weights = [];
+
+    const getDefaultWeights = () =>
+        (new Array(windowRadius * 2 + 1).fill(0))
+            .map(_ => new Array(windowRadius * 2 + 1).fill(0)
+                .map(_ =>  new Float32Array(tileCount)));
 
     for (let x = 0; x < tiles.length; x++) {
         for (let y = 0; y < tiles[x].length; y++) {
@@ -460,27 +411,50 @@ const generateModel = async img => {
                         const thisId = tiles[x][y].id
                         const newId = tiles[x + i][y + j].id;
                         weights[thisId] = weights[thisId] || getDefaultWeights();
-                        weights[thisId][i][j][newId] = (weights[tiles[x][y].id][i][j][newId] || 0) + 1;
+                        weights[thisId][i+windowRadius][j+windowRadius][newId] =
+                            (weights[tiles[x][y].id][i+windowRadius][j+windowRadius][newId] || 0) + 1/totalWeight;
                     }
                 }
             }
         }
     }
-    return {tileStore, tileSize, weights, baseWeights}
+
+    return {tileStore, tileSize, weights, baseWeights, windowRadius, tileCount}
 }
+
+async function drawTiles(model) {
+    const canvas = document.createElement("canvas");
+    canvas.width = model.tileCount * model.tileSize * 2;
+    canvas.height = model.tileSize * 2 * 2;
+    canvas.style.width = model.tileSize * model.tileCount * 2;
+    canvas.style.height = model.tileSize * 2 * 2;
+    window.document.body.prepend(canvas);
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false; // keep pixel perfect
+    ctx.font = `12px serif`;
+    ctx.fillStyle = '#000000';
+    for(let i=0;i<model.tileStore.length; i++) {
+        await ctx.fillText(`${i}`, i * model.tileSize * 2, model.tileSize * 1.5);
+        const img = model.tileStore[i];
+        const bitmap = await createImageBitmap(img);
+        await ctx.drawImage(bitmap, i * model.tileSize * 2, model.tileSize * 2, model.tileSize*2,model.tileSize*2);
+    }
+
+}
+
 
 async function init() {
     const img = await (async () => {
         const img = new Image();
         img.src = "platform.png";
         document.body.appendChild(img);
-
         await img.decode();
         return img;
     })();
     const model = await generateModel(img);
+    await drawTiles(model)
     const ctx = createCanvas();
-    const world = new World(model);
+    const world = new World(model, ctx);
     window._ctx = ctx;
     window._world = world;
 
@@ -489,6 +463,7 @@ async function init() {
         window.requestAnimationFrame(loop)
     }
     loop();
+
     await world.collapse(true)
     while (true) {
         if (!await world.collapse()) {
