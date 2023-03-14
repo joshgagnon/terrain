@@ -5,6 +5,8 @@ const Y_RES = 1000;
 const SEED = 8;
 const EMPTY_OBJ = {};
 const MAX_PROPAGATE_DISTANCE = 1000;
+const IMAGE_PATH = 'patterns/Skyline 2.png'
+const TILE_SIZE = 2;
 
 function mulberry32(a) {
     return function () {
@@ -356,7 +358,7 @@ class World {
 
         let cleanSet = new Float32Array(this.grid[i][j].possibleTiles);
 
-        for (let x of [-1,0 1]) {
+        for (let x of [-1, 1]) {
             let sums = new Float32Array(this.model.tileCount);
             if (!this.grid[i + x]?.[j]) {
                 continue;
@@ -436,7 +438,7 @@ const generateModel = async img => {
     ctx.willReadFrequently = true;
     ctx.drawImage(img, 0, 0);
     const windowRadius = 1;
-    const tileSize = 2;
+    const tileSize = TILE_SIZE;
     const tiles = [];
     const tileStore = [];
     const tileMap = {};
@@ -513,7 +515,7 @@ async function drawTiles(model) {
 async function init() {
     const img = await (async () => {
         const img = new Image();
-        img.src = "patterns/Rule 126.png";
+        img.src = IMAGE_PATH;
         document.body.appendChild(img);
         await img.decode();
         return img;
